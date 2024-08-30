@@ -1,7 +1,6 @@
 import express, { Request, Response } from 'express';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-import axios from 'axios';
 import fs from "fs";
 
 const Connection = require('database-js').Connection;
@@ -26,13 +25,15 @@ if (GEMINI_KEY === 'YOUR_API_KEY') {
 	process.exit(1);
 }
 
+app.use(bodyParser.json());
+
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
-var model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" })
 
 const db = new Connection('sqlite://./data.db');
 function createDatabase() {
-	// TODO: Verificar se o month seria por "Jan" ou 1.
-	db.execute('CREATE TABLE IF NOT EXISTS readings (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id VARCHAR(255), month_year VARCHAR(100), stored_data VARCHAR(255));')
+    let str = 'CREATE TABLE IF NOT EXISTS readings (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id VARCHAR(255), month_year VARCHAR(100), stored_data VARCHAR(255));';
+    let stmt = db.prepareStatement(str);
+    stmt.execute()
 		.then((results : any) => {
 			console.log('Readings table created.');
 		})
@@ -42,11 +43,11 @@ function createDatabase() {
 	;
 }
 
-db.then(createDatabase);
-db.catch((err: any) => {
-	console.error('Erro ao conectar ao banco de dados', err);
-	process.exit(1);
-});
+if (!db) {
+    console.error('Failed to connect to database.');
+    process.exit(1);
+}
+createDatabase();
 
 // Define uma rota básica
 app.get('/', (req: Request, res: Response) => {
@@ -55,7 +56,9 @@ app.get('/', (req: Request, res: Response) => {
 });
 
 async function getDataFromDatabase(customer_id: string, month_year: string) {
-	return await db.execute(`SELECT * FROM readings WHERE customer_id = '${customer_id}' AND month_year = '${month_year}';`)
+    let query = `SELECT * FROM readings WHERE customer_id = '${customer_id}' AND month_year = '${month_year}'`;
+    let stmt = db.prepareStatement(query);
+	return await stmt.execute()
 		.then((results: any) => {
 			return results;
 		})
@@ -67,7 +70,9 @@ async function getDataFromDatabase(customer_id: string, month_year: string) {
 }
 
 async function saveDataToDatabase(customer_id: string, month_year: string, stored_data: string) {
-    return await db.execute(`INSERT INTO readings (customer_id, month_year, stored_data) VALUES ('${customer_id}', '${month_year}', '${stored_data}');`)
+    let query = `INSERT INTO readings (customer_id, month_year, stored_data) VALUES ('${customer_id}', '${month_year}', '${stored_data}');`;
+    let stmt = db.prepareStatement(query);
+    return await stmt.execute()
         .then((results: any) => {
             return results;
         })
@@ -85,14 +90,6 @@ interface UploadRequestBody {
     measure_type: 'WATER' | 'GAS';
 }
 
-// Request type: GET
-// Request Body
-// {
-//	"image": "base64",
-//	"customer_code": "string",
-//	"measure_datetime": "datetime",
-//	"measure_type": "WATER" ou "GAS"
-// }
 // Converts local file information to a GoogleGenerativeAI.Part object.
 function fileToGenerativePart(pathBase64 : string, mimeType : string) {
     return {
@@ -115,7 +112,16 @@ async function getImageData(filePart : any, measure_type : string) {
     return generatedContent.response;
 }
 
-app.get('/upload', async (req: Request, res: Response) => {
+// Request type: GET
+// Request Body
+// {
+//	"image": "base64",
+//	"customer_code": "string",
+//	"measure_datetime": "datetime",
+//	"measure_type": "WATER" ou "GAS"
+// }
+// Definindo a rota /upload para aceitar requisições POST
+app.post('/upload', async (req: Request, res: Response) => {
     const { image, customer_code, measure_datetime, measure_type }: UploadRequestBody = req.body;
 
     if (!image) {
@@ -247,7 +253,7 @@ app.patch('/confirm', async (req: Request, res: Response) => {
     const new_stored_data = JSON.stringify(stored_data);
 
     const query = `UPDATE readings SET stored_data = '${new_stored_data}' WHERE customer_id = '${customer_code}' AND month_year = '${measure_datetime}'`;
-    const success = await db.execute(query);
+    let success = await db.prepareStatement(query).execute();
     if (success === null) {
         return res.status(500).json({
             error_code: 'DATABASE_ERROR',
@@ -283,7 +289,8 @@ app.get("/:client_id/list", async (req: Request, res: Response) => {
     }
 
     try {
-        const results = await db.execute(query);
+        let stmt = db.prepareStatement(query);
+        let results = await stmt.execute();
         if (results.length === 0) {
             return res.status(404).json({
                 error_code: "MEASURES_NOT_FOUND",
