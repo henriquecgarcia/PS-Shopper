@@ -19,5 +19,5 @@ RUN npm run build
 # Expõe a porta da aplicação
 EXPOSE 3000
 
-# Comando para iniciar a aplicação
-CMD ["node", "dist/index.js"]
+# Comando para iniciar a aplicação de nodejs
+CMD ["node", "dist/main.js"]
